@@ -76,13 +76,15 @@ client.on('message', async (msg) => {
   }
 
   const paymentType = extract('Pago', body) || ''
+  const deliveryMethod = extract('Método de Entrega', body)
   const category = paymentType.includes('$') ? 'venta' : 'cortesia'
   const source = from === GRUPO_VENTAS ? 'whatsapp_ventas' : 'whatsapp_cortesias'
 
-  const firstOrderMatch = body.match(/Pedido:\s*([\s\S]*?)(?=Ubicación de Entrega:|$)/i)
+  // El pedido va de "Pedido:" hasta "Dirección de Entrega" (o "Ubicación de Entrega" en formato viejo).
+  const firstOrderMatch = body.match(/Pedido:\s*([\s\S]*?)(?=(?:Dirección|Ubicación) de Entrega:|$)/i)
   const first_order = firstOrderMatch ? firstOrderMatch[1].trim() : null
 
-  const addressMatch = body.match(/Ubicación de Entrega:\s*([\s\S]*?)$/i)
+  const addressMatch = body.match(/(?:Dirección|Ubicación) de Entrega:\s*([\s\S]*?)$/i)
   const delivery_address = addressMatch
     ? addressMatch[1].replace(/👇[\u{1F3FB}-\u{1F3FF}\s]*/gu, '').trim()
     : null
@@ -92,6 +94,7 @@ client.on('message', async (msg) => {
     whatsapp: extract('WhatsApp', body),
     instagram: extract('Ig', body),
     payment_type: paymentType,
+    delivery_method: deliveryMethod,
     first_order,
     delivery_address,
     category,
@@ -125,6 +128,7 @@ client.on('message', async (msg) => {
           .update({
             first_order: customer.first_order,
             payment_type: customer.payment_type,
+            delivery_method: customer.delivery_method,
             delivery_address: customer.delivery_address,
             category: customer.category,
             whatsapp_msg_id: msgId,
