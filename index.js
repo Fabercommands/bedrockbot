@@ -4,11 +4,27 @@ const qrcode = require('qrcode-terminal')
 const { createClient } = require('@supabase/supabase-js')
 const ws = require('ws')
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Bandido Jewelry — Bot de WhatsApp
+//
+// Lee mensajes formateados que llegan a los grupos de WhatsApp y los guarda como
+// leads en la tabla `customers` de Supabase. El admin los convierte en pedidos.
+//
+// Se conecta escaneando el QR (como WhatsApp Web). Debe correr SIEMPRE prendido.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
   { realtime: { transport: ws } }
 )
+
+// IDs de los grupos de WhatsApp de Bandido (se configuran en el .env).
+// Si no los tienes todavía, deja DEBUG_GROUPS=true para que el bot imprima
+// el ID de cada grupo donde llegue un mensaje, y luego los copias aquí.
+const GRUPO_VENTAS = process.env.GRUPO_VENTAS || ''
+const GRUPO_CORTESIAS = process.env.GRUPO_CORTESIAS || ''
+const DEBUG_GROUPS = process.env.DEBUG_GROUPS === 'true'
 
 const client = new Client({
   authStrategy: new LocalAuth(),
@@ -16,18 +32,19 @@ const client = new Client({
 })
 
 client.on('qr', (qr) => {
-  console.log('Escanea este QR con tu WhatsApp:')
+  console.log('\n📱 Escanea este QR con WhatsApp (Dispositivos vinculados):\n')
   qrcode.generate(qr, { small: true })
 })
 
 client.on('ready', () => {
-  console.log('✅ Bot conectado y escuchando...')
+  console.log('\n✅ Bot de Bandido conectado y escuchando...\n')
+  if (!GRUPO_VENTAS && !GRUPO_CORTESIAS) {
+    console.log('⚠️  No configuraste GRUPO_VENTAS ni GRUPO_CORTESIAS en el .env.')
+    console.log('    Pon DEBUG_GROUPS=true, manda un mensaje al grupo y copia el ID que aparezca.\n')
+  }
 })
 
-const GRUPO_CORTESIAS = '120363424985329640@g.us'
-const GRUPO_VENTAS = '120363424470342719@g.us'
-
-// In-memory dedup of message IDs (TTL = 10 min)
+// Dedup en memoria (TTL 10 min)
 const recentMsgIds = new Set()
 const RECENT_MSG_TTL_MS = 10 * 60 * 1000
 function rememberMsgId(id) {
@@ -39,17 +56,18 @@ client.on('message', async (msg) => {
   const body = msg.body
   const from = msg.from
   const msgId = msg.id?._serialized
-
   if (!msgId) return
-  if (recentMsgIds.has(msgId)) {
-    console.log('🔁 Mensaje ya procesado, ignorando:', msgId)
-    return
+
+  // Modo debug: imprime el ID de cualquier grupo para que lo copies al .env
+  if (DEBUG_GROUPS && from.endsWith('@g.us')) {
+    console.log('🔎 Grupo detectado → ID:', from)
   }
 
-  console.log('📨 Mensaje recibido de:', from, '| Texto:', body.substring(0, 50))
-
-  if (from !== GRUPO_CORTESIAS && from !== GRUPO_VENTAS) return
+  if (recentMsgIds.has(msgId)) return
+  if (from !== GRUPO_VENTAS && from !== GRUPO_CORTESIAS) return
   if (!body.includes('Nombre:') || !body.includes('WhatsApp:')) return
+
+  console.log('📨 Lead recibido de:', from, '| Texto:', body.substring(0, 50))
 
   const extract = (label, text) => {
     const regex = new RegExp(`${label}:\\s*(.+)`)
@@ -83,7 +101,7 @@ client.on('message', async (msg) => {
 
   rememberMsgId(msgId)
 
-  // ── Phone-window dedup before insert ──────────────────────────
+  // Dedup por ventana de teléfono antes de insertar
   if (customer.whatsapp) {
     const windowStart = new Date(Date.now() - 30 * 60 * 1000).toISOString()
     const { data: recentRows, error: recentErr } = await supabase
@@ -112,32 +130,22 @@ client.on('message', async (msg) => {
             whatsapp_msg_id: msgId,
           })
           .eq('id', existing.id)
-
-        if (updErr) {
-          console.error('❌ Error actualizando cliente existente:', updErr.message)
-        } else {
-          console.log('🔄 Cliente existente actualizado con info más completa:', customer.full_name)
-        }
+        if (updErr) console.error('❌ Error actualizando lead:', updErr.message)
+        else console.log('🔄 Lead actualizado con info más completa:', customer.full_name)
       } else {
-        console.log('⏭️  Ya existe cliente reciente con info igual o más completa, ignorando:', customer.full_name)
+        console.log('⏭️  Lead reciente igual o más completo, ignorando:', customer.full_name)
       }
       return
     }
   }
 
-  // ── No recent match — INSERT normally ─────────────────────────
-  const { error } = await supabase
-    .from('customers')
-    .insert([customer])
-
+  // Insertar nuevo lead
+  const { error } = await supabase.from('customers').insert([customer])
   if (error) {
-    if (error.code === '23505') {
-      console.log('🔁 Duplicado ignorado por DB:', msgId)
-    } else {
-      console.error('❌ Error guardando:', error.message)
-    }
+    if (error.code === '23505') console.log('🔁 Duplicado ignorado por DB:', msgId)
+    else console.error('❌ Error guardando:', error.message)
   } else {
-    console.log('✅ Cliente guardado:', customer.full_name, '| Categoría:', category)
+    console.log('✅ Lead guardado:', customer.full_name, '| Categoría:', category)
   }
 })
 

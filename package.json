@@ -1,14 +1,12 @@
 {
-  "name": "bedrock-whatsapp-bot",
+  "name": "bandido-whatsapp-bot",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
+  "description": "Bot de WhatsApp para Bandido Jewelry — lee leads de los grupos y los guarda en Supabase",
   "license": "ISC",
-  "description": "",
   "dependencies": {
     "@supabase/supabase-js": "^2.105.3",
     "dotenv": "^17.4.2",
